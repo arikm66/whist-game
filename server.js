@@ -1,7 +1,10 @@
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
+const mongoose = require('mongoose');
+const Game = require('./models/Game');
 
 const app = express();
 const server = http.createServer(app);
@@ -9,15 +12,10 @@ const io = new Server(server, {
     cors: { origin: "*" }
 });
 
-// Game State Management
-let connectedPlayers = [];
-let gameState = {
-    currentTrick: [], // Cards played in the current round
-    turn: 0,          // Index of the player whose turn it is (0-3)
-    scores: [0, 0],   // Team 1 (Players 1&3), Team 2 (Players 2&4)
-    trump: '♠',       // Default trump suit
-    leadSuit: null    // The suit that started the trick
-};
+// Connect to MongoDB
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/whist')
+    .then(() => console.log("Connected to MongoDB"))
+    .catch(err => console.error("Could not connect to MongoDB", err));
 
 const suits = ['♠', '♥', '♦', '♣'];
 const values = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
@@ -29,16 +27,13 @@ function shuffleDeck() {
     return deck.sort(() => Math.random() - 0.5);
 }
 
-// Logic to determine the winner of a trick
-function determineTrickWinner(trick) {
+function determineTrickWinner(trick, trump) {
     let winner = trick[0];
     for (let i = 1; i < trick.length; i++) {
         const current = trick[i];
-        // If current card is trump and winner isn't, trump wins
-        if (current.card.suit === gameState.trump && winner.card.suit !== gameState.trump) {
+        if (current.card.suit === trump && winner.card.suit !== trump) {
             winner = current;
         } 
-        // If both are same suit (trump or lead), higher value wins
         else if (current.card.suit === winner.card.suit) {
             if (cardValueMap[current.card.value] > cardValueMap[winner.card.value]) {
                 winner = current;
@@ -48,112 +43,97 @@ function determineTrickWinner(trick) {
     return winner;
 }
 
-io.on('connection', (socket) => {
-    // Only add and log if we have room for more players
-    if (connectedPlayers.length < 4) {
-        connectedPlayers.push(socket.id);
-        
-        // Log the player number (1-4) out of four
-        console.log(`Player joined: ${connectedPlayers.length}/4 (ID: ${socket.id})`);
-        
-        // Notify all clients of the current count
-        io.emit('player_count', connectedPlayers.length);
-    } else {
-        console.log(`Connection rejected: Server full (ID: ${socket.id})`);
+io.on('connection', async (socket) => {
+    // Find the current game or create a new one if it doesn't exist
+    let game = await Game.findOne({ gameId: 'main_lobby' });
+    if (!game) {
+        game = new Game({ gameId: 'main_lobby', players: [], gameState: { scores: [0, 0], turn: 0, trump: '♠' } });
     }
 
-    // Start Game once 4 players join
-    if (connectedPlayers.length === 4) {
+    // Check if player is already in the game (e.g., refreshing)
+    let player = game.players.find(p => p.socketId === socket.id);
+
+    if (!player && game.players.length < 4) {
+        const playerNumber = game.players.length + 1;
+        game.players.push({ socketId: socket.id, playerNumber, hand: [] });
+        await game.save();
+        console.log(`Player joined: ${game.players.length}/4 (ID: ${socket.id})`);
+    }
+
+    io.emit('player_count', game.players.length);
+
+    // Start game logic
+    if (game.players.length === 4 && game.players[0].hand.length === 0) {
         const deck = shuffleDeck();
-        gameState.turn = 0;
-        connectedPlayers.forEach((id, index) => {
-            const hand = deck.slice(index * 13, (index + 1) * 13);
-            io.to(id).emit('deal_cards', {  // <--- Check this event name
-                hand, 
-                playerNumber: index + 1,
-                gameState 
+        game.players.forEach((p, index) => {
+            p.hand = deck.slice(index * 13, (index + 1) * 13);
+        });
+        game.gameState.turn = 0;
+        await game.save();
+
+        game.players.forEach((p) => {
+            io.to(p.socketId).emit('deal_cards', { 
+                hand: p.hand, 
+                playerNumber: p.playerNumber,
+                gameState: game.gameState 
             });
         });
     }
 
-    // Handle playing a card
-    socket.on('play_card', (card) => {
-        const playerIdx = connectedPlayers.indexOf(socket.id);
+    socket.on('play_card', async (card) => {
+        const currentGame = await Game.findOne({ gameId: 'main_lobby' });
+        const playerIdx = currentGame.players.findIndex(p => p.socketId === socket.id);
         
-        // Validation: Turn check
-        if (playerIdx !== gameState.turn) return;
+        if (playerIdx !== currentGame.gameState.turn) return;
 
-        // Set lead suit if it's the first card of the trick
-        if (gameState.currentTrick.length === 0) gameState.leadSuit = card.suit;
-
-        gameState.currentTrick.push({ card, player: playerIdx });
+        if (currentGame.gameState.currentTrick.length === 0) currentGame.gameState.leadSuit = card.suit;
+        currentGame.gameState.currentTrick.push({ card, player: playerIdx });
         
-        // Move to next player
-        gameState.turn = (gameState.turn + 1) % 4;
+        currentGame.gameState.turn = (currentGame.gameState.turn + 1) % 4;
 
-        // Check if trick is complete
-        if (gameState.currentTrick.length === 4) {
-            const winnerData = determineTrickWinner(gameState.currentTrick);
-            
-            // Assign point to the winning team (Team 0: players 0 & 2 | Team 1: players 1 & 3)
+        if (currentGame.gameState.currentTrick.length === 4) {
+            const winnerData = determineTrickWinner(currentGame.gameState.currentTrick, currentGame.gameState.trump);
             const teamIndex = winnerData.player % 2;
-            gameState.scores[teamIndex]++;
-            
-            // Winner of the last trick starts the next one
-            gameState.turn = winnerData.player;
+            currentGame.gameState.scores[teamIndex]++;
+            currentGame.gameState.turn = winnerData.player;
 
             io.emit('trick_result', {
                 winner: winnerData.player,
-                trick: gameState.currentTrick,
-                scores: gameState.scores
+                trick: currentGame.gameState.currentTrick,
+                scores: currentGame.gameState.scores
             });
 
-            gameState.currentTrick = [];
-            gameState.leadSuit = null;
+            currentGame.gameState.currentTrick = [];
+            currentGame.gameState.leadSuit = null;
         }
 
-        io.emit('update_state', gameState);
+        // Update player's hand in DB
+        currentGame.players[playerIdx].hand = currentGame.players[playerIdx].hand.filter(
+            c => !(c.suit === card.suit && c.value === card.value)
+        );
+
+        await currentGame.save();
+        io.emit('update_state', currentGame.gameState);
     });
 
-    socket.on('disconnect', () => {
-        // Find which player number this was before removing them
-        const playerIndex = connectedPlayers.indexOf(socket.id);
-        
-        if (playerIndex !== -1) {
-            console.log(`Player left: ${playerIndex + 1} (ID: ${socket.id})`);
-            console.log(`Remain:${connectedPlayers.length}`); // Log line added
-            
-            // Remove the player from the list
-            connectedPlayers = connectedPlayers.filter(id => id !== socket.id);
-            
-            // Notify all remaining clients of the new player count
-            io.emit('player_count', connectedPlayers.length);
-
-            // Logic to handle game reset if a player leaves during a match
-            if (connectedPlayers.length < 4) {
-                console.log("Game interrupted: Not enough players to continue. Resetting state.");
-                gameState.currentTrick = [];
-                // You can add an io.emit('game_error', 'A player disconnected') here if you like
+    socket.on('disconnect', async () => {
+        const currentGame = await Game.findOne({ gameId: 'main_lobby' });
+        if (currentGame) {
+            const playerIndex = currentGame.players.findIndex(p => p.socketId === socket.id);
+            if (playerIndex !== -1) {
+                console.log(`Player ${playerIndex + 1} (ID: ${socket.id}) has left.`);
+                // Note: In a persistent game, you might not want to remove them immediately 
+                // so they can reconnect. For now, we update the count.
+                io.emit('player_count', currentGame.players.length);
             }
-        } else {
-            console.log('An unassigned user disconnected.');
         }
     });
 });
 
+// Serve Frontend
 app.use(express.static(path.join(__dirname, 'client/dist')));
-// Serve static files from the React app
-app.use(express.static(path.join(__dirname, 'client/dist')));
-
-// Fallback for Single Page Application (SPA): Redirect all non-file requests to index.html
-app.use((req, res, next) => {
-    // If the request is for a file (has an extension), let it fail naturally
-    if (path.extname(req.path).length > 0) {
-        res.status(404).end();
-    } else {
-        // Otherwise, send the React index.html
-        res.sendFile(path.join(__dirname, 'client/dist/index.html'));
-    }
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'client/dist/index.html'));
 });
 
 const PORT = process.env.PORT || 3001;

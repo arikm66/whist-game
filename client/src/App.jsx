@@ -31,14 +31,16 @@ export default function App() {
     socket.on('player_count', (count) => setPlayerCount(count));
 
     socket.on('deal_cards', (data) => {
-      // Apply the sort here before setting state
       const organizedHand = sortCards(data.hand);
       setHand(organizedHand);
       setPlayerNum(data.playerNumber);
       setGameState(data.gameState);
     });
 
-    socket.on('update_state', (newState) => setGameState(newState));
+    socket.on('update_state', (newState) => {
+      console.log("State updated, current turn:", newState.turn);
+      setGameState(newState);
+    });
 
     return () => {
       socket.off('player_count');
