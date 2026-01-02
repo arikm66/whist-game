@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+client/node_modules/
+
+# Production builds
+client/dist/
+
+# Environment variables
+.env
+
+# Editor files
+.vscode/
+.DS_Store
