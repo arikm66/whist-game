@@ -1,7 +1,25 @@
 import React, { useEffect, useState } from 'react';
 import io from 'socket.io-client';
+import Lobby from './components/lobby/Lobby';
+import GameBoard from './components/game/GameBoard';
 
 const socket = io(window.location.hostname === 'localhost' ? 'http://localhost:3001' : '/');
+
+// --- Helper for Sorting ---
+const suitOrder = { '♠': 1, '♥': 2, '♣': 3, '♦': 4 };
+const valueOrder = { 
+  '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 
+  'J': 11, 'Q': 12, 'K': 13, 'A': 14 
+};
+
+const sortCards = (cards) => {
+  return [...cards].sort((a, b) => {
+    if (suitOrder[a.suit] !== suitOrder[b.suit]) {
+      return suitOrder[a.suit] - suitOrder[b.suit];
+    }
+    return valueOrder[a.value] - valueOrder[b.value];
+  });
+};
 
 export default function App() {
   const [playerCount, setPlayerCount] = useState(0);
@@ -10,21 +28,17 @@ export default function App() {
   const [gameState, setGameState] = useState(null);
 
   useEffect(() => {
-    socket.on('player_count', (count) => {
-      setPlayerCount(count);
+    socket.on('player_count', (count) => setPlayerCount(count));
+
+    socket.on('deal_cards', (data) => {
+      // Apply the sort here before setting state
+      const organizedHand = sortCards(data.hand);
+      setHand(organizedHand);
+      setPlayerNum(data.playerNumber);
+      setGameState(data.gameState);
     });
 
-    // The server sends 'deal_cards' when the 4th player joins
-    socket.on('deal_cards', (data) => {
-        console.log("Cards received!", data);
-        setHand(data.hand); // This will trigger the UI to switch from "Waiting" to the game table
-        setPlayerNum(data.playerNumber);
-        setGameState(data.gameState);
-    });
-      
-    socket.on('update_state', (newState) => {
-      setGameState(newState);
-    });
+    socket.on('update_state', (newState) => setGameState(newState));
 
     return () => {
       socket.off('player_count');
@@ -33,56 +47,27 @@ export default function App() {
     };
   }, []);
 
-  const playCard = (card, index) => {
+  const handlePlayCard = (card, index) => {
     if (gameState?.turn !== (playerNum - 1)) {
-        alert("It's not your turn!");
-        return;
+      alert("It's not your turn!");
+      return;
     }
     socket.emit('play_card', card);
-    // Remove played card from UI hand immediately
+    // Locally remove the card to keep UI snappy
     setHand(hand.filter((_, i) => i !== index));
   };
 
   return (
-    <div style={{ padding: '20px', fontFamily: 'sans-serif', textAlign: 'center' }}>
-      <h1>Whist: Player {playerNum || "Connecting..."}</h1>
-      <p>Lobby: {playerCount} / 4</p>
-      <hr />
-
-      {hand.length > 0 ? (
-        <div>
-          <div style={{ marginBottom: '20px', background: '#f0f0f0', padding: '10px' }}>
-            <h3>Table (Trick)</h3>
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', minHeight: '80px' }}>
-              {gameState?.currentTrick.map((item, i) => (
-                <div key={i} style={{ border: '1px solid #000', padding: '10px', borderRadius: '5px', background: 'white' }}>
-                  P{item.player + 1}: {item.card.value}{item.card.suit}
-                </div>
-              ))}
-            </div>
-            <p><strong>Current Turn: Player {gameState ? gameState.turn + 1 : "?"}</strong></p>
-          </div>
-
-          <h3>Your Hand</h3>
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '5px', flexWrap: 'wrap' }}>
-            {hand.map((card, i) => (
-              <button 
-                key={i} 
-                onClick={() => playCard(card, i)}
-                style={{ 
-                    padding: '10px', 
-                    fontSize: '18px', 
-                    cursor: 'pointer',
-                    color: (card.suit === '♥' || card.suit === '♦') ? 'red' : 'black'
-                }}
-              >
-                {card.value}{card.suit}
-              </button>
-            ))}
-          </div>
-        </div>
+    <div className="app-container">
+      {!playerNum ? (
+        <Lobby playerCount={playerCount} />
       ) : (
-        <h2>Waiting for {4 - playerCount} more players...</h2>
+        <GameBoard 
+          playerNum={playerNum} 
+          hand={hand} 
+          gameState={gameState} 
+          onPlayCard={handlePlayCard} 
+        />
       )}
     </div>
   );

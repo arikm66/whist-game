@@ -120,7 +120,8 @@ io.on('connection', (socket) => {
         const playerIndex = connectedPlayers.indexOf(socket.id);
         
         if (playerIndex !== -1) {
-            console.log(`Player left: ${playerIndex + 1} (ID: ${socket.id})`); // Log line added
+            console.log(`Player left: ${playerIndex + 1} (ID: ${socket.id})`);
+            console.log(`Remain:${connectedPlayers.length}`); // Log line added
             
             // Remove the player from the list
             connectedPlayers = connectedPlayers.filter(id => id !== socket.id);
