@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import io from 'socket.io-client';
+import Login from './components/login/Login';
 import Lobby from './components/lobby/Lobby';
 import GameBoard from './components/game/GameBoard';
 
@@ -35,6 +36,7 @@ const sortCards = (cards) => {
 };
 
 export default function App() {
+  const [user, setUser] = useState(null);
   const [playerCount, setPlayerCount] = useState(0);
   const [hand, setHand] = useState([]);
   const [playerNum, setPlayerNum] = useState(null);
@@ -78,18 +80,20 @@ export default function App() {
     setHand(hand.filter((_, i) => i !== index));
   };
 
+  if (!user) {
+    return <Login onLoginSuccess={(userData) => setUser(userData)} />;
+  }
+
+  if (!playerNum) {
+    return <Lobby playerCount={playerCount} />;
+  }
+
   return (
-    <div className="app-container">
-      {!playerNum ? (
-        <Lobby playerCount={playerCount} />
-      ) : (
-        <GameBoard
-          playerNum={playerNum}
-          hand={hand}
-          gameState={gameState}
-          onPlayCard={handlePlayCard}
-        />
-      )}
-    </div>
+    <GameBoard
+      playerNum={playerNum}
+      hand={hand}
+      gameState={gameState}
+      onPlayCard={handlePlayCard}
+    />
   );
 }
