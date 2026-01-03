@@ -5,8 +5,6 @@ const { Server } = require('socket.io');
 const path = require('path');
 const mongoose = require('mongoose');
 const Game = require('./models/Game');
-const session = require('express-session');
-const MongoStore = require('connect-mongo');
 const passport = require('passport');
 
 const app = express();
@@ -20,20 +18,7 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/whist')
     .then(() => console.log("Connected to MongoDB"))
     .catch(err => console.error("Could not connect to MongoDB", err));
 
-const sessionMiddleware = session({
-    secret: process.env.SESSION_SECRET || 'whist-secret',
-    resave: false,
-    saveUninitialized: false,
-    store: MongoStore.create({ mongoUrl: process.env.MONGODB_URI }),
-    cookie: { maxAge: 1000 * 60 * 60 * 24 } // 1 day
-});
-
-app.use(sessionMiddleware);
 app.use(passport.initialize());
-app.use(passport.session());
-
-// Share session with Socket.io
-io.engine.use(sessionMiddleware);
 
 const suits = ['♠', '♥', '♦', '♣'];
 const values = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
