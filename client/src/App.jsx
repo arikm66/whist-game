@@ -3,13 +3,26 @@ import io from 'socket.io-client';
 import Lobby from './components/lobby/Lobby';
 import GameBoard from './components/game/GameBoard';
 
-const socket = io(window.location.hostname === 'localhost' ? 'http://localhost:3001' : '/');
+const socket = io(
+  window.location.hostname === 'localhost' ? 'http://localhost:3001' : '/'
+);
 
 // --- Helper for Sorting ---
 const suitOrder = { '♠': 1, '♥': 2, '♣': 3, '♦': 4 };
-const valueOrder = { 
-  '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 
-  'J': 11, 'Q': 12, 'K': 13, 'A': 14 
+const valueOrder = {
+  '2': 2,
+  '3': 3,
+  '4': 4,
+  '5': 5,
+  '6': 6,
+  '7': 7,
+  '8': 8,
+  '9': 9,
+  '10': 10,
+  'J': 11,
+  'Q': 12,
+  'K': 13,
+  'A': 14,
 };
 
 const sortCards = (cards) => {
@@ -38,19 +51,25 @@ export default function App() {
     });
 
     socket.on('update_state', (newState) => {
-      console.log("State updated, current turn:", newState.turn);
+      console.log('State updated, current turn:', newState.turn);
       setGameState(newState);
+    });
+
+    socket.on('trick_result', (data) => {
+      console.log(`Player ${data.winner + 1} won the trick!`);
+      alert(`Player ${data.winner + 1} took the trick!`);
     });
 
     return () => {
       socket.off('player_count');
       socket.off('deal_cards');
       socket.off('update_state');
+      socket.off('trick_result');
     };
   }, []);
 
   const handlePlayCard = (card, index) => {
-    if (gameState?.turn !== (playerNum - 1)) {
+    if (gameState?.turn !== playerNum - 1) {
       alert("It's not your turn!");
       return;
     }
@@ -64,11 +83,11 @@ export default function App() {
       {!playerNum ? (
         <Lobby playerCount={playerCount} />
       ) : (
-        <GameBoard 
-          playerNum={playerNum} 
-          hand={hand} 
-          gameState={gameState} 
-          onPlayCard={handlePlayCard} 
+        <GameBoard
+          playerNum={playerNum}
+          hand={hand}
+          gameState={gameState}
+          onPlayCard={handlePlayCard}
         />
       )}
     </div>
