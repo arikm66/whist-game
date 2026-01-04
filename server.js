@@ -13,6 +13,8 @@ const io = new Server(server, {
     cors: { origin: "*" }
 });
 
+console.log(`MONGODB_URI: ${process.env.MONGODB_URI}`);
+
 // Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/whist')
     .then(() => console.log("Connected to MongoDB"))
